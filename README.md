@@ -12,3 +12,7 @@ sshknock [host] [password]
 Before you start the server, make sure you edit the config at the top of the file.
 
 Please note that this script is not ment to provide "real security", but rather to prevent the logs to be flooded with annoying attempts to connect to public ssh services.
+
+TODO list:
+- Make it go into the background properly
+- Move some stuff to configuration file
