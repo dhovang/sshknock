@@ -1,0 +1,245 @@
+#!/usr/bin/python2.7
+
+# Simple sshd port knocking (C) Dan Hovang 2019
+
+# Usage:
+#  To start as server, run as root:
+#   sshknock server
+#
+#  To operate as client, use:
+#   sshknock [host] [password]
+
+# Configuration section - change to a password of your liking!
+
+PASSWORD = 'change_me_ffs'
+
+DB_FILE = "/var/run/knock"
+LOG_IDENT = 'sshknock'
+
+# Time in seconds for maximum clock drift between client and server
+
+GRACE_TIME = 5 * 60
+
+# Seconds that the host will be open in the firewall
+
+PORT_OPEN_FOR = 60 * 60 * 24
+
+# Name of iptables user chain where rules are stored
+
+CHAIN_NAME = 'spa-open'
+
+# Code ..
+
+import os
+import re
+import sys
+import dbm
+import time
+import socket
+import random
+import hashlib
+import syslog
+import binascii
+import subprocess
+import traceback
+
+INVOKE_RULE = [ 'INPUT', '-p', 'tcp', '--dport', '22', '-j', CHAIN_NAME ]
+
+def log(msg):
+  syslog.openlog(LOG_IDENT)
+  syslog.syslog(msg)
+
+def log_auth(msg):
+  syslog.openlog(LOG_IDENT, 0, syslog.LOG_AUTH)
+  syslog.syslog(msg)
+
+def iptables(args = None):
+  rc = 0
+  res = ""
+  try:
+    cmd = [ 'iptables' ]
+    if args:
+      cmd.extend(args)
+    res = subprocess.check_output(cmd)
+  except subprocess.CalledProcessError as e:
+    rc = e.returncode
+    res = e.output
+
+  return (rc, res)
+
+
+# Make sure our chain exists
+
+def iptables_setup():
+
+  # Create user defined chain
+
+  rc, res = iptables([ '-L', CHAIN_NAME, '-vn' ])
+  if rc != 0:
+    rc, res = iptables([ '-N', CHAIN_NAME ])
+
+  # Make sure it's invoked
+
+  cmd = [ '-C' ]
+  cmd.extend(INVOKE_RULE)
+  rc, res = iptables(cmd)
+  if rc == 1:
+    cmd = [ '-I' ]
+    cmd.extend(INVOKE_RULE)
+    rc, res = iptables(cmd)
+
+def iptables_clear():
+  rc, res = iptables([ '-F', CHAIN_NAME ])
+
+def host_rule(ip):
+  return [ CHAIN_NAME, '-s', ip, '-p', 'tcp', '--dport', '22', '-j', 'ACCEPT' ]
+
+def iptables_add(ip):
+  cmd = [ '-C' ]
+  cmd.extend(host_rule(ip))
+  rc, res = iptables(cmd)
+  if rc == 0:
+    return
+  cmd = [ '-A' ]
+  cmd.extend(host_rule(ip))
+  rc, res = iptables(cmd)
+
+def iptables_del(ip):
+  cmd = [ '-D' ]
+  cmd.extend(host_rule(ip))
+  rc, res = iptables(cmd)
+
+def build_packet(password):
+  tm = "%016x" % int(time.time() * 100)
+  rnd = "%016x" % long(random.getrandbits(64))
+  h = binascii.hexlify(hashlib.pbkdf2_hmac('sha256', password, "%s%s" % (tm, rnd), 16384))
+  pkt = "%s,%s,%s" % (tm, rnd, h)
+  return pkt
+
+def get_packet_tm(data):
+  return long("0x%s" % data.split(',')[0], 16)
+
+
+def process_packet(data, addr, password):
+  ip = str(addr[0])
+  tm, rnd, h_in = data.split(',')
+
+  # Check hash to password
+
+  h = binascii.hexlify(hashlib.pbkdf2_hmac('sha256', password, "%s%s" % (tm, rnd), 16384))
+
+  if h != h_in:
+    log_auth("bad hash from %s" % ip)
+    return False
+
+  # Allow 5 minutes drift / latency
+
+  tm_int = get_packet_tm(data)
+  tm_limit = long((time.time() - GRACE_TIME) * 100)
+
+  if tm_int < tm_limit:
+    log_auth("too old packet rejected from %s" % ip)
+    return False
+
+  # Update database
+
+  db = dbm.open(DB_FILE, "c")
+  db[ip] = data
+  db.close()
+
+  iptables_add(ip)
+
+  log_auth("%s successfully authenticated" % ip)
+
+  return True
+
+def send_udp_message(data, ip, port = 7776):
+  sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+  sock.sendto(data, (ip, port))
+
+
+def cleanup():
+
+  # TODO delete rules that is not in database
+
+  db = dbm.open(DB_FILE, "c")
+  now = time.time() * 100
+  for k in db.keys():
+    data = db[k]
+    tm = get_packet_tm(data)
+    age = now - tm
+
+    if age > (PORT_OPEN_FOR * 100):
+      iptables_del(k)
+      del db[k]
+      log_auth("%s expired" % k)
+
+  db.close()
+
+
+def run_server(port = 7776):
+
+  log('starting')
+
+  # Setup iptables
+
+  iptables_setup()
+
+  # Create UDP socket
+
+  sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+  sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+  sock.settimeout(5)
+  sock.bind(("0.0.0.0", port))
+
+  log("listening to requests on port %d" % port)
+
+  # Wait for inbound message
+
+  while True:
+    cleanup()
+    try:
+      data, addr = sock.recvfrom(1024)
+      if data:
+        process_packet(data, addr, PASSWORD)
+    except socket.timeout:
+      pass
+    except KeyboardInterrupt:
+      break
+    except:
+      log('caught exception')
+      time.sleep(5)
+
+def run_client():
+
+  host = sys.argv[1]
+  password = sys.argv[2]
+
+  if not re.match('[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+', host):
+    try:
+      res = socket.gethostbyname(host)
+    except:
+      print("can not find host %s" % host)
+      sys.exit(1)
+    ip = res
+  else:
+    ip = host
+
+  pkt = build_packet(password)
+  send_udp_message(pkt, ip)
+  print("send to %s: %s" % (ip, pkt))
+
+# Start
+
+if len(sys.argv) == 2 and sys.argv[1] == 'server':
+  run_server()
+  sys.exit(0)
+
+if len(sys.argv) != 3:
+  print("usage: spa [host] [password]")
+  print("or to start server:")
+  print("spa server")
+  sys.exit(0)
+
+run_client()
+
