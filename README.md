@@ -19,3 +19,4 @@ ProxyCommand bash -c '/path/to/sshknock %h YourKnockPassword && sleep 0.2 && exe
 TODO list:
 - Make it go into the background properly
 - Move some stuff to configuration file
+- Add proxy option to make it more clean working with ProxyCommand (e.g. integrate delay + netcat)
