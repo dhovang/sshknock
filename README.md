@@ -13,6 +13,9 @@ Before you start the server, make sure you edit the config at the top of the fil
 
 Please note that this script is not ment to provide "real security", but rather to prevent the logs to be flooded with annoying attempts to connect to public ssh services.
 
+In order to knock automatically, put this in your ssh config for the host:
+ProxyCommand bash -c '/path/to/sshknock %h YourKnockPassword && sleep 0.2 && exec /bin/nc %h %p'
+
 TODO list:
 - Make it go into the background properly
 - Move some stuff to configuration file
