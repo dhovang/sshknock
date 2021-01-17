@@ -42,6 +42,7 @@ import syslog
 import binascii
 import subprocess
 import traceback
+from select import select
 
 INVOKE_RULE = [ 'INPUT', '-p', 'tcp', '--dport', '22', '-j', CHAIN_NAME ]
 
@@ -52,6 +53,9 @@ def log(msg):
 def log_auth(msg):
   syslog.openlog(LOG_IDENT, 0, syslog.LOG_AUTH)
   syslog.syslog(msg)
+
+def error(msg):
+  sys.stderr.write(msg)
 
 def iptables(args = None):
   rc = 0
@@ -210,6 +214,48 @@ def run_server(port = 7776):
       log('caught exception')
       time.sleep(5)
 
+def netcat(host, port):
+
+  bufsize = 512
+  try:
+    ipaddr = socket.gethostbyname(host)
+  except:
+    error("error: %s unknown\n" % host)
+    return
+
+  fno_in = sys.__stdin__.fileno()
+  fno_out = sys.__stdout__.fileno()
+
+  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+  sock.connect((ipaddr, port))
+
+  _infd = [ fno_in, sock.fileno() ]
+  _outfd = []
+  _excfd = [ fno_in, fno_out, sock.fileno() ]
+
+  while True:
+
+    _in, _out, _exc = select(_infd, _outfd, _excfd)
+    for fno in _in:
+      if fno == fno_in:
+        data = os.read(fno_in, bufsize)
+        if not data: # EOF?
+          return
+        sock.send(data)
+      elif fno == sock.fileno():
+        data = sock.recv(bufsize)
+        if not data:
+          return
+        os.write(fno_out, data)
+      else:
+        error("BORK! %d" % fno)
+        return
+
+    if len(_exc) > 0:
+      error("error: %s" % _exc)
+      return
+
+
 def run_client():
 
   host = sys.argv[1]
@@ -219,7 +265,7 @@ def run_client():
     try:
       res = socket.gethostbyname(host)
     except:
-      print("can not find host %s" % host)
+      error("can not find host %s" % host)
       sys.exit(1)
     ip = res
   else:
@@ -227,7 +273,15 @@ def run_client():
 
   pkt = build_packet(password)
   send_udp_message(pkt, ip)
-  print("send to %s: %s" % (ip, pkt))
+
+  if len(sys.argv) >= 4:
+    ncport = int(sys.argv[3])
+    if len(sys.argv) == 5:
+      nc_delay = int(sys.argv[4])
+    else:
+      nc_delay = 200
+    time.sleep(nc_delay / 1000)
+    netcat(host, ncport)
 
 # Start
 
@@ -235,10 +289,14 @@ if len(sys.argv) == 2 and sys.argv[1] == 'server':
   run_server()
   sys.exit(0)
 
-if len(sys.argv) != 3:
-  print("usage: spa [host] [password]")
+if not len(sys.argv) in (3, 4, 5):
+  print("Usage:")
+  print(" sshknock host password [nc_port] [nc_delay = 200]")
+  print("  Providing a nc_port will start a netcat to host:nc_port nc_delay milliseconds after SPA is sent")
+  print("  If no nc_delay is given, but nc_port is, default delay is 200ms")
+  print("  If no nc_port is given, knocker will exit immediately after SPA packet is sent")
   print("or to start server:")
-  print("spa server")
+  print(" sshknock server")
   sys.exit(0)
 
 run_client()

@@ -7,7 +7,7 @@ This script can be started either as a server or as a client:
 
 or
 
-    sshknock [host] [password]
+    sshknock host password [netcat port] [netcat delay]
 
 Before you start the server, make sure you edit the config at the top of the file.
 
@@ -20,8 +20,13 @@ In order to knock automatically, put a ProxyCommand in your ssh config for the h
       HostName ip-or-fqdn
       ProxyCommand bash -c '/path/to/sshknock %h YourKnockPassword && sleep 0.2 && exec /bin/nc %h %p'
 
+Alternatively, you can use the built-in netcat function like so:
+
+    Host MyHost
+      User MyUserName
+      HostName ip-or-fqdn
+      ProxyCommand /usr/bin/env python2.7 /path/to/sshknock %h YourKnockPassword %p
+
 TODO list:
-- Make it go into the background properly
 - Move some stuff to configuration file
-- Add proxy option to make it more clean working with ProxyCommand (e.g. integrate delay + netcat)
 - Make it work with Python3
