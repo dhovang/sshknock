@@ -1,4 +1,4 @@
-#!/usr/bin/python2.7
+#!/usr/bin/python3
 
 # Simple sshd port knocking (C) Dan Hovang 2019
 
@@ -115,13 +115,13 @@ def iptables_del(ip):
 
 def build_packet(password):
   tm = "%016x" % int(time.time() * 100)
-  rnd = "%016x" % long(random.getrandbits(64))
-  h = binascii.hexlify(hashlib.pbkdf2_hmac('sha256', password, "%s%s" % (tm, rnd), 16384))
+  rnd = "%016x" % int(random.getrandbits(64))
+  h = binascii.hexlify(hashlib.pbkdf2_hmac('sha256', password.encode(), ("%s%s" % (tm, rnd)).encode(), 16384))
   pkt = "%s,%s,%s" % (tm, rnd, h)
   return pkt
 
 def get_packet_tm(data):
-  return long("0x%s" % data.split(',')[0], 16)
+  return int("0x%s" % data.split(',')[0], 16)
 
 
 def process_packet(data, addr, password):
@@ -130,7 +130,7 @@ def process_packet(data, addr, password):
 
   # Check hash to password
 
-  h = binascii.hexlify(hashlib.pbkdf2_hmac('sha256', password, "%s%s" % (tm, rnd), 16384))
+  h = binascii.hexlify(hashlib.pbkdf2_hmac('sha256', password.decode(), "%s%s" % (tm, rnd), 16384))
 
   if h != h_in:
     log_auth("bad hash from %s" % ip)
@@ -139,7 +139,7 @@ def process_packet(data, addr, password):
   # Allow 5 minutes drift / latency
 
   tm_int = get_packet_tm(data)
-  tm_limit = long((time.time() - GRACE_TIME) * 100)
+  tm_limit = int((time.time() - GRACE_TIME) * 100)
 
   if tm_int < tm_limit:
     log_auth("too old packet rejected from %s" % ip)
@@ -159,7 +159,7 @@ def process_packet(data, addr, password):
 
 def send_udp_message(data, ip, port = 7776):
   sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-  sock.sendto(data, (ip, port))
+  sock.sendto(data.encode(), (ip, port))
 
 
 def cleanup():
@@ -300,4 +300,3 @@ if not len(sys.argv) in (3, 4, 5):
   sys.exit(0)
 
 run_client()
-
