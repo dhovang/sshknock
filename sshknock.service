@@ -10,7 +10,7 @@ Type=simple
 Restart=always
 RestartSec=10
 User=root
-ExecStart=/usr/bin/env python2.7 /usr/local/bin/sshknock server
+ExecStart=/usr/bin/env python3 /usr/local/bin/sshknock server
 
 [Install]
 WantedBy=multi-user.target

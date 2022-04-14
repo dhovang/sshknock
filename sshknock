@@ -113,12 +113,17 @@ def iptables_del(ip):
   cmd.extend(host_rule(ip))
   rc, res = iptables(cmd)
 
-def build_packet(password):
-  tm = "%016x" % int(time.time() * 100)
-  rnd = "%016x" % int(random.getrandbits(64))
+def build_packet_from(password, time32, rand):
+  tm = "%016x" % time32
+  rnd = "%016x" % rand
   h = binascii.hexlify(hashlib.pbkdf2_hmac('sha256', password.encode(), ("%s%s" % (tm, rnd)).encode(), 16384))
-  pkt = "%s,%s,%s" % (tm, rnd, h)
+  pkt = "%s,%s,%s" % (tm, rnd, h.decode('utf-8'))
   return pkt
+
+def build_packet(password):
+  time32 = int(time.time() * 100)
+  rand = int(random.getrandbits(64))
+  return build_packet_from(password, time32, rand)
 
 def get_packet_tm(data):
   return int("0x%s" % data.split(',')[0], 16)
@@ -287,6 +292,17 @@ def run_client():
 
 if len(sys.argv) == 2 and sys.argv[1] == 'server':
   run_server()
+  sys.exit(0)
+
+if len(sys.argv) == 2 and sys.argv[1] == 'test':
+  time = 164992061138 #int(time.time() * 100)
+  random = 14171775276828072369 #long(random.getrandbits(64))
+  password = "my_password123"
+  packet = build_packet_from(password, time, random)
+  print("time: %s" % time)
+  print("rand: %s" % random)
+  print("packet: %s" % packet)
+  print("expect: %s" % "000000266a4b0ed2,c4ac42876c0019b1,652a5a0d9536fa348686d5d96a313663cb008f7a887709230412f62eb2194af5")
   sys.exit(0)
 
 if not len(sys.argv) in (3, 4, 5):
