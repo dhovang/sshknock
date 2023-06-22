@@ -25,7 +25,7 @@ Alternatively, you can use the built-in netcat function like so:
     Host MyHost
       User MyUserName
       HostName ip-or-fqdn
-      ProxyCommand /usr/bin/env python2.7 /path/to/sshknock %h YourKnockPassword %p
+      ProxyCommand /usr/bin/env python3 /path/to/sshknock %h YourKnockPassword %p
 
 TODO list:
 - Move some stuff to configuration file
